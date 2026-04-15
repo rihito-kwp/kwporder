@@ -29,10 +29,15 @@ function checkInventory() {
   const alerts = [];
 
   data.forEach(function(row) {
-    const sku          = row[0]; // A列: 日本管理SKU
-    const productName  = row[1]; // B列: 日本管理商品名
-    const combinedStock = row[4]; // E列: 国立+Amazon合算在庫
-    const monthlySales  = row[5]; // F列: 月間売上合計
+    const sku            = row[0]; // A列: 日本管理SKU
+    const productName    = row[1]; // B列: 日本管理商品名
+    const nationalStock  = row[2]; // C列: 国立倉庫現在庫
+    const fbaStock       = row[3]; // D列: Amazon(FBA)在庫
+    const combinedStock  = row[4]; // E列: 国立+Amazon合算在庫
+    const monthlySales   = row[5]; // F列: 月間売上合計
+    const shopifySales   = row[6]; // G列: Shopify月間売上
+    const wholesaleSales = row[7]; // H列: 卸月間売上
+    const amazonSales    = row[8]; // I列: Amazon月間売上
 
     // SKUまたは月間売上が空の行はスキップ
     if (!sku || !monthlySales || monthlySales === 0) return;
@@ -44,8 +49,13 @@ function checkInventory() {
       alerts.push({
         sku: sku,
         name: productName,
+        nationalStock: nationalStock || 0,
+        fbaStock: fbaStock || 0,
         stock: combinedStock,
         monthlySales: monthlySales,
+        shopifySales: shopifySales || 0,
+        wholesaleSales: wholesaleSales || 0,
+        amazonSales: amazonSales || 0,
         monthsRemaining: Math.round(monthsRemaining * 10) / 10, // 小数点1桁
         suggestedOrder: Math.ceil(monthlySales * 3 - combinedStock), // 3ヶ月分になるよう補充
       });
@@ -74,8 +84,9 @@ function notify(alerts, draft) {
   const lines = alerts.map(function(item) {
     return [
       '*' + item.sku + '* — ' + item.name,
-      '　在庫: ' + item.stock + '個　月販: ' + item.monthlySales + '個　残り: *' + item.monthsRemaining + 'ヶ月*',
-      '　発送指示推奨数: *' + item.suggestedOrder + '個*（3ヶ月分まで補充）',
+      '　在庫　｜ 国立: ' + item.nationalStock + '個　FBA: ' + item.fbaStock + '個　合計: *' + item.stock + '個*',
+      '　月販　｜ Shopify: ' + item.shopifySales + '個　卸: ' + item.wholesaleSales + '個　Amazon: ' + item.amazonSales + '個　合計: ' + item.monthlySales + '個',
+      '　残り *' + item.monthsRemaining + 'ヶ月分* → 発送指示推奨: *' + item.suggestedOrder + '個*（3ヶ月分まで補充）',
     ].join('\n');
   });
 

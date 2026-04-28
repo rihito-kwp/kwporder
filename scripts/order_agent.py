@@ -146,7 +146,14 @@ def main():
     try:
         result = run_agent(knowledge, products, inventory_csv)
     except Exception as e:
+        import traceback
         print(f"❌ Claude API エラー: {e}", file=sys.stderr)
+        print("--- traceback ---", file=sys.stderr)
+        traceback.print_exc()
+        # API key の文字種を検査（値は出さない）
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        non_ascii = [(i, c, hex(ord(c))) for i, c in enumerate(key) if ord(c) > 127]
+        print(f"--- API key validation: len={len(key)}, non-ascii chars at: {non_ascii}", file=sys.stderr)
         sys.exit(1)
 
     slack_text = f"📦 *KicksWrap 発注検討アラート*\n\n{result}"

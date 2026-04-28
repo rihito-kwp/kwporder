@@ -9,19 +9,73 @@ jobs:
   order-check:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - uses: anthropics/claude-code-action@v1
         with:
-          python-version: '3.12'
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            あなたはKicksWrapの発注エージェントです。以下の手順で発注下書きを作成してSlackに通知してください。
 
-      - name: 依存パッケージをインストール
-        run: pip install google-genai requests
+            ## 手順
 
-      - name: 発注エージェントを実行
-        run: python scripts/order_agent.py
+            ### 1. ルールを把握する
+            リポジトリ内の以下のMDファイルを全て読み込み、発注ルール・商品マスタ・テンプレートを理解する:
+            - 発注者.md
+            - knowledge/*.md
+            - templates/hanchu.md
+            - products/*.md（_template.md は除外）
+
+            ### 2. 在庫データを取得
+            環境変数 `SHEET_CSV_URL` のURLからCSVを取得（curl でOK）。列構成は2行目以降:
+            - A列: 日本管理SKU
+            - B列: 商品名
+            - C列: 国立倉庫在庫
+            - D列: Amazon(FBA)在庫
+            - E列: 合算在庫（C+D）
+            - F列: 月間売上合計
+            - G列: Shopify月販 / H列: 卸月販 / I列: Amazon月販
+
+            ### 3. 発注検討リストを作成
+            - 残月数（E÷F、小数点1桁）を計算
+            - 残月数が **2.0未満** の商品をリストアップ
+            - SKUまたは月間売上が空・0の行はスキップ
+
+            ### 4. Chatwork発注下書きを生成
+            発注者.md と各 products/ファイルのルールを参照して、ヲヲフェニックスへの依頼文を作成:
+            - 液体商品（DRY・SR・YR・FC-200・CW・LC系）は **EMS便②** 形式
+            - それ以外は **快速船便③** 形式
+            - templates/hanchu.md の形式に従う
+            - 数量は3ヶ月分になるよう補充（在庫との差分、ロットに合わせて切り上げ）
+            - キット商品は構成品を個別に記載
+
+            ### 5. Slackに送信
+            環境変数 `SLACK_WEBHOOK` のURLに以下の形式でPOST:
+            ```
+            curl -X POST -H 'Content-Type: application/json' \
+              -d '{"text": "..."}' "$SLACK_WEBHOOK"
+            ```
+            本文は以下の構造:
+            ```
+            📦 *KicksWrap 発注検討アラート*
+
+            *■ 発注検討リスト*
+            [商品ごとの在庫状況の表]
+
+            *■ Chatwork発注下書き*
+            [②EMS便と③快速船便に分けた発注依頼文]
+            ```
+
+            ## 重要な注意事項
+            - リポジトリには **絶対にコミット・プッシュしない**
+            - PRやIssueを作らない
+            - 単に分析してSlackに送信するだけ
+
+          claude_args: '--allowed-tools "Bash,Read,Glob,Grep"'
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          SHEET_CSV_URL:  ${{ secrets.SHEET_CSV_URL }}
-          SLACK_WEBHOOK:  ${{ secrets.SLACK_WEBHOOK }}
+          SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}

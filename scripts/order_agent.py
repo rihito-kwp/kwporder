@@ -5,12 +5,13 @@ import os
 import sys
 from pathlib import Path
 
-import anthropic
 import requests
+from google import genai
+from google.genai import types
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-SHEET_CSV_URL     = os.environ["SHEET_CSV_URL"]
-SLACK_WEBHOOK     = os.environ["SLACK_WEBHOOK"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+SHEET_CSV_URL  = os.environ["SHEET_CSV_URL"]
+SLACK_WEBHOOK  = os.environ["SLACK_WEBHOOK"]
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -48,25 +49,16 @@ def fetch_inventory_csv() -> str:
 
 
 def run_agent(knowledge: str, products: str, inventory_csv: str) -> str:
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # ナレッジ・商品マスタは変化が少ないのでプロンプトキャッシュを適用
-    system = [
-        {
-            "type": "text",
-            "text": (
-                "あなたはKicksWrapの発注エージェントです。\n"
-                "以下のルールと商品マスタに従い、在庫データから発注判断を行ってください。\n\n"
-                "## ルール・ナレッジ\n\n" + knowledge
-            ),
-            "cache_control": {"type": "ephemeral"},
-        },
-        {
-            "type": "text",
-            "text": "## 商品マスタ（products/*.md）\n\n" + products,
-            "cache_control": {"type": "ephemeral"},
-        },
-    ]
+    system = (
+        "あなたはKicksWrapの発注エージェントです。\n"
+        "以下のルールと商品マスタに従い、在庫データから発注判断を行ってください。\n\n"
+        "## ルール・ナレッジ\n\n"
+        + knowledge
+        + "\n\n---\n\n## 商品マスタ（products/*.md）\n\n"
+        + products
+    )
 
     user = f"""今日の在庫データを分析して、以下の2つを出力してください。
 
@@ -102,22 +94,16 @@ SKUまたは月間売上が空・0の行はスキップしてください。
 - キット商品は構成品を個別に記載
 """
 
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4096,
-        system=system,
-        messages=[{"role": "user", "content": user}],
+    response = client.models.generate_content(
+        model="gemini-2.0-flash",
+        config=types.GenerateContentConfig(
+            system_instruction=system,
+            max_output_tokens=4096,
+        ),
+        contents=user,
     )
 
-    usage = response.usage
-    print(
-        f"  → tokens: input={usage.input_tokens}, "
-        f"cache_read={getattr(usage, 'cache_read_input_tokens', 0)}, "
-        f"cache_write={getattr(usage, 'cache_creation_input_tokens', 0)}, "
-        f"output={usage.output_tokens}"
-    )
-
-    return response.content[0].text
+    return response.text
 
 
 def post_to_slack(text: str):
@@ -136,29 +122,22 @@ def main():
     print("▶ 在庫データを取得中...")
     try:
         inventory_csv = fetch_inventory_csv()
-        row_count = inventory_csv.count("\n")
-        print(f"  → {row_count} 行取得")
+        print(f"  → {inventory_csv.count(chr(10))} 行取得")
     except Exception as e:
         print(f"❌ 在庫データ取得失敗: {e}", file=sys.stderr)
         sys.exit(1)
 
-    print("▶ Claude に分析を依頼中...")
+    print("▶ Gemini に分析を依頼中...")
     try:
         result = run_agent(knowledge, products, inventory_csv)
     except Exception as e:
         import traceback
-        print(f"❌ Claude API エラー: {e}", file=sys.stderr)
-        print("--- traceback ---", file=sys.stderr)
+        print(f"❌ Gemini API エラー: {e}", file=sys.stderr)
         traceback.print_exc()
-        # API key の文字種を検査（値は出さない）
-        key = os.environ.get("ANTHROPIC_API_KEY", "")
-        non_ascii = [(i, c, hex(ord(c))) for i, c in enumerate(key) if ord(c) > 127]
-        print(f"--- API key validation: len={len(key)}, non-ascii chars at: {non_ascii}", file=sys.stderr)
         sys.exit(1)
 
-    slack_text = f"📦 *KicksWrap 発注検討アラート*\n\n{result}"
-
     print("▶ Slack に送信中...")
+    slack_text = f"📦 *KicksWrap 発注検討アラート*\n\n{result}"
     try:
         post_to_slack(slack_text)
         print("✅ Slack送信完了")

@@ -17,14 +17,11 @@ jobs:
           python-version: '3.12'
 
       - name: 依存パッケージをインストール
-        run: pip install anthropic requests
+        run: pip install google-genai requests
 
       - name: 発注エージェントを実行
         run: python scripts/order_agent.py
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SHEET_CSV_URL:     ${{ secrets.SHEET_CSV_URL }}
-          SLACK_WEBHOOK:     ${{ secrets.SLACK_WEBHOOK }}
-          PYTHONUTF8:        '1'
-          LANG:              C.UTF-8
-          LC_ALL:            C.UTF-8
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SHEET_CSV_URL:  ${{ secrets.SHEET_CSV_URL }}
+          SLACK_WEBHOOK:  ${{ secrets.SLACK_WEBHOOK }}

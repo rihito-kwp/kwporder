@@ -1,0 +1,91 @@
+name: 月次発注下書き（15日）
+
+on:
+  schedule:
+    - cron: '0 20 14 * *'  # 毎月15日 05:00 JST (= 14日 20:00 UTC)
+  workflow_dispatch:
+
+jobs:
+  order-monthly:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          prompt: |
+            あなたはKicksWrapの発注エージェントです。以下の手順で月次発注下書きを作成してSlackに通知してください。
+
+            ## 手順
+
+            ### 1. ルールファイルを読む
+            リポジトリ内の以下のファイルを必ず読む:
+            - 発注者.md
+            - knowledge/商品マスタ.md
+            - knowledge/在庫構成.md
+            - knowledge/卸注文.md
+            - products/ フォルダ内の全ファイル（_template.md は除く）
+
+            ### 2. 在庫データを取得する
+            環境変数 `SHEET_CSV_URL` のURLからCSVを取得（curl でOK）。
+
+            列の構成（1行目はヘッダー、2行目からデータ）:
+            - A列: 日本管理SKU
+            - B列: 商品名
+            - C列: 国立倉庫在庫
+            - D列: Amazon(FBA)在庫
+            - E列: 合算在庫（C+D）
+            - F列: 月間売上合計（Shopify+卸+Amazon）
+            - G列: Shopify月販
+            - H列: 卸月販
+            - I列: Amazon月販
+
+            ### 3. 発注検討リストを作成する
+            - E列 ÷ F列 = 残月数（小数点1桁）
+            - 残月数が **2.0未満** の商品をリストアップ
+            - SKUまたは月間売上が空・0の行はスキップ
+
+            ### 4. 発注下書きを生成する
+            発注者.md と products/[商品名].md のルールを参照して、ヲヲフェニックスへのChatwork発注依頼文を作成する。
+            - 商品名（発送コード）・数量（3ヶ月分になるよう補充）・構成内容・作業内容を含める
+            - 液体商品（DRY・SR・YR・FC-200・CW・LC系）はEMS輸送（LT40日）と明記
+            - キット商品（PFSCK・FSCK）は構成品を個別に記載
+            - products/ファイルが存在する商品はロット・LTを参照する
+
+            ### 5. Slackに送信する
+            環境変数 `SLACK_WEBHOOK` のURLに以下の形式でPOSTする:
+            ```
+            curl -X POST -H 'Content-Type: application/json' \
+              -d '{"text": "..."}' "$SLACK_WEBHOOK"
+            ```
+
+            メッセージ形式:
+            ```
+            📦 *KicksWrap 月次発注下書き（15日）*
+
+            *■ 発注検討リスト*
+            [商品ごとに]
+            ・*SKU* — 商品名
+            　国立: X個 / FBA: X個 / 合算: X個
+            　月販: X個（Shopify:X / 卸:X / Amazon:X）
+            　残り: X.Xヶ月 → 推奨発注数: X個
+
+            *■ Chatwork発注下書き*
+            [生成した発注依頼文]
+            ```
+
+            ## 重要な注意事項
+            - リポジトリには **絶対にコミット・プッシュしない**
+            - PRやIssueを作らない
+            - 単に分析してSlackに送信するだけ
+
+          claude_args: '--allowed-tools "Bash,Read,Glob,Grep"'
+        env:
+          SHEET_CSV_URL: ${{ secrets.SHEET_CSV_URL }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
